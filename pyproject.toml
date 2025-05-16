@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mate-strategy"
+version = "0.0.0"               # just a placeholder
+description = "Lightweight prompt+validation helper for LLM JSON"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Younes Strittmatter", email = "ystrittm@gmail.com" }]
+
+[tool.setuptools.packages.find]
+where = ["src"]
