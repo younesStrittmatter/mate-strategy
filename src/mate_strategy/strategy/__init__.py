@@ -222,7 +222,7 @@ class BaseStrategy(Strategy):
         First, we create a prompt with a schema:
         >>> from dataclasses import dataclass
         >>> from mate_strategy.rules.predefined import Interval
-        >>> from mate_strategy.parseable import Schema
+        >>> from mate_strategy.schema import Schema
         >>> @dataclass
         ... class LuckyNumbers(Schema):
         ...     a: Interval[0, 10]
@@ -343,7 +343,7 @@ class Fallback(Strategy):
         We start by defining a schema and a prompt as before ...
         >>> from dataclasses import dataclass
         >>> from mate_strategy.rules.predefined import Interval
-        >>> from mate_strategy.parseable import Schema
+        >>> from mate_strategy.schema import Schema
         >>> @dataclass
         ... class LuckyNumbers(Schema):
         ...     a: Interval[0, 10]
@@ -512,7 +512,7 @@ class AutoRepair(Strategy):
     Example:
         We start by defining a schema and a prompt as before ...
         >>> from dataclasses import dataclass
-        >>> from mate_strategy.parseable import Schema
+        >>> from mate_strategy.schema import Schema
         >>> from mate_strategy.rules.predefined import Interval
         >>>
         >>> @dataclass
