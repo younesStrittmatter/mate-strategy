@@ -19,10 +19,12 @@ class GenericWrapper(Generic[T]):
     def json(self) -> Dict[str, Any]:
         return self._to_dict_impl(self._inner)  # HOOK #2
 
+    @staticmethod
     @abstractmethod
     def _to_domain_impl(self) -> Dict[str, Any]:
         pass
 
+    @staticmethod
     @abstractmethod
     def _to_dict_impl(self, inner: T) -> Dict[str, Any]:
         pass
