@@ -1,7 +1,10 @@
 from dataclasses import dataclass, fields
-from typing import get_type_hints, get_origin, get_args, Any, Callable, Tuple, Union
+from typing import (get_type_hints, get_origin, get_args,
+                    Any, Callable, Tuple, Union, Optional)
 import json
 from mate_strategy.rules import Rule
+
+NoneType = type(None)
 
 
 def constraint(path: str, desc: str, *, fix: Callable[[dict], None] | None = None):
@@ -179,7 +182,119 @@ class Schema:
         >>> MySchema.validate_with_error({"x": 2})
         (False, '"x" is invalid.', '"x" must be between 0 and 1 or be a string')
 
-        ... for all, we can use List, Tuples and Unions
+        ... for all, we can use List, Tuples, Unions or Optional
+        >>> from typing import List, Tuple, Union, Optional
+        >>> @dataclass
+        ... class ListSchema(Schema):
+        ...     a: List[int]
+        >>> @dataclass
+        ... class TupleSchema(Schema):
+        ...     a: Tuple[int, int]
+        >>> @dataclass
+        ... class UnionSchema(Schema):
+        ...     a: Union[int, str]
+        >>> @dataclass
+        ... class OptionalSchema(Schema):
+        ...     a: Optional[int]
+        ...     b: int
+
+        ... we can get prompts:
+        >>> print(ListSchema.prompt()) # doctest: +NORMALIZE_WHITESPACE
+        Fill in **valid JSON** for the fields below.
+        <BLANKLINE>
+        Rules
+        - a must be a list. An element of the list must be a integer
+        <BLANKLINE>
+        Example:
+        {
+          "a": [
+            42
+          ]
+        }
+        <BLANKLINE>
+        Return **only** the JSON object — no code-fences, no comments.
+
+        >>> print(TupleSchema.prompt()) # doctest: +NORMALIZE_WHITESPACE
+        Fill in **valid JSON** for the fields below.
+        <BLANKLINE>
+        Rules
+        - a must be a tuple (el[0] must be a integer, el[1] must be a integer)
+        <BLANKLINE>
+        Example:
+        {
+          "a": [
+            42,
+            42
+          ]
+        }
+        <BLANKLINE>
+        Return **only** the JSON object — no code-fences, no comments.
+
+        >>> print(UnionSchema.prompt()) # doctest: +NORMALIZE_WHITESPACE
+        Fill in **valid JSON** for the fields below.
+        <BLANKLINE>
+        Rules
+        - a must satisfy ONE of: must be a integer or must be a string
+        <BLANKLINE>
+        Example:
+        {
+          "a": 42
+        }
+        <BLANKLINE>
+        Return **only** the JSON object — no code-fences, no comments.
+
+        >>> print(OptionalSchema.prompt()) # doctest: +NORMALIZE_WHITESPACE
+        Fill in **valid JSON** for the fields below.
+        <BLANKLINE>
+        Rules
+        - a (optional) must be a integer can be missing
+        - b must be a integer
+        <BLANKLINE>
+        Example:
+        {
+          "a": 42,
+          "b": 42
+        }
+        <BLANKLINE>
+        Return **only** the JSON object — no code-fences, no comments.
+
+        ... and we can validate these:
+        >>> ListSchema.validate_with_error({"a": [1, 2, 3]})
+        (True,)
+
+        >>> ListSchema.validate_with_error({"a": 1})
+        (False, '"a" must be a list, got int', '"a" must be list')
+
+        >>> TupleSchema.validate_with_error({"a": (1, 2)})
+        (True,)
+
+        >>> TupleSchema.validate_with_error({"a": (1, 2, 3)})
+        (False, '"a" must have length 2, got 3', '"a" must be length-2 tuple')
+
+        >>> UnionSchema.validate_with_error({"a": 1})
+        (True,)
+
+        >>> UnionSchema.validate_with_error({"a": "example"})
+        (True,)
+
+        >>> UnionSchema.validate_with_error({"a": [1]})
+        (False, '"a" matches none of the allowed alternatives.', '"a" must be integer or "a" must be string')
+
+        >>> OptionalSchema.validate_with_error({"a": 1, "b": 2})
+        (True,)
+
+        >>> OptionalSchema.validate_with_error({"a": None, "b": 2})
+        (True,)
+
+        >>> OptionalSchema.validate_with_error({"b": 2})
+        (True,)
+
+        >>> OptionalSchema.validate_with_error({"a": 1})
+        (False, '"b" is missing.', '"b" must be present.')
+
+
+
+
         >>> from typing import List
         >>> @dataclass
         ... class MySchema(Schema):
@@ -241,7 +356,6 @@ class Schema:
         }
         <BLANKLINE>
         Return **only** the JSON object — no code-fences, no comments.
-
 
         ... and we can validate this:
         >>> OuterSchema.validate_with_error({"a": {"x": [0.5], "y": [42, "example"], "z": "hi"}, "b": "example"})
@@ -388,6 +502,8 @@ class Schema:
 
 
 
+
+
     """
     _declared_constraints: list[tuple[str, str, staticmethod]] = []
 
@@ -436,6 +552,10 @@ class Schema:
     def _is_union(t):
         return get_origin(t) is Union
 
+    @staticmethod
+    def _is_optional(t):
+        return Schema._is_union(t) and NoneType in get_args(t) and len(get_args(t)) == 2
+
     # ──────────────────────────────────────────────────────────────────────z
 
     @classmethod
@@ -462,6 +582,11 @@ class Schema:
             parts = ", ".join(_p)
             return f"must be a tuple ({parts})"
 
+        # optional
+        if cls._is_optional(typ):
+            non_none = next(t for t in get_args(typ) if t is not NoneType)
+            return f"(optional) {cls._describe_type(non_none)} can be missing"
+
         # union
         if cls._is_union(typ):
             return "must satisfy ONE of: " + " or ".join(
@@ -484,6 +609,10 @@ class Schema:
 
         if cls._is_tuple(typ):
             return [cls._example_for_type(t) for t in get_args(typ)]  # lists → valid JSON
+
+        if cls._is_optional(typ):
+            non_none = next(t for t in get_args(typ) if t is not NoneType)
+            return cls._example_for_type(non_none)
 
         if cls._is_union(typ):
             # pick first alternative for deterministic example
@@ -656,7 +785,14 @@ class Schema:
                     return err
             return None
 
-        # 4 union
+        # 4 optional
+        if cls._is_optional(typ):
+            non_none = next(t for t in get_args(typ) if t is not NoneType)
+            if val is None:
+                return None
+            return cls._validate_value(key, val, non_none, prefix)
+
+        # 5 union
         if cls._is_union(typ):
             expected_msgs = []
             for alt in get_args(typ):
@@ -669,7 +805,7 @@ class Schema:
                 " or ".join(expected_msgs),
             )
 
-        # 5 nested Schemas
+        # 6 nested Schemas
         base = cls._origin(typ)
         if cls._is_schema(base):
             if not isinstance(val, dict):
@@ -677,7 +813,7 @@ class Schema:
             ok, *reason = base.validate_with_error(val)
             return None if ok else reason  # (err, expected)
 
-        # 6 primitives
+        # 7 primitives
         if typ is str and not isinstance(val, str):
             return f'"{full}" must be string', f'"{full}" must be string'
         if typ is int and not isinstance(val, int):
@@ -700,6 +836,8 @@ class Schema:
         # per-field validation ------------------------------------------
         for name, typ in cls._field_types().items():
             if name not in data:
+                if cls._is_optional(typ):
+                    continue  # missing optional is fine
                 return False, f'"{name}" is missing.', f'"{name}" must be present.'
 
             err = cls._validate_value(name, data[name], typ)
