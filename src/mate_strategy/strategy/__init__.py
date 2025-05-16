@@ -21,9 +21,9 @@ from typing import Dict, Any, Callable, Protocol
 from contextlib import contextmanager
 from functools import wraps
 
-from src.mate_strategy.io.open_ai_json import ask_ai_json
-from src.mate_strategy.prompt import Prompt
-from src.mate_strategy.rules.predefined import Interval
+from mate_strategy.io.open_ai_json import ask_ai_json
+from mate_strategy.prompt import Prompt
+from mate_strategy.rules.predefined import Interval
 
 
 # ═════════════════════════ strategy protocol ══════════════════════════

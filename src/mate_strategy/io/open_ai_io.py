@@ -2,7 +2,7 @@ import time, json, re
 
 from openai import OpenAI
 
-from src.mate_strategy._config import config
+from mate_strategy._config import config
 
 
 def ask_ai(prompt: str,

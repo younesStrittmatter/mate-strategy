@@ -1,6 +1,6 @@
 import re, random
 
-from src.mate_strategy.rules import Rule
+from mate_strategy.rules import Rule
 
 
 class Interval(Rule):

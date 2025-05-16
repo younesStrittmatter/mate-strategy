@@ -1,7 +1,7 @@
 import re
 import json
 
-from src.mate_strategy.io.open_ai_io import ask_ai
+from mate_strategy.io.open_ai_io import ask_ai
 
 
 def ask_ai_json(prompt: str,

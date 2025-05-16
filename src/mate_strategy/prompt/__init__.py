@@ -1,4 +1,3 @@
-# prompt.py  ─────────────────────────────────────────────────────────
 from dataclasses import dataclass
 from string import Formatter
 from typing import Type, Dict, Any
@@ -14,7 +13,7 @@ class Prompt:
 
     Example:
         >>> from dataclasses import dataclass
-        >>> from mate_strategy.parseable import Schema
+        >>> from mate_strategy.schema import Schema
         >>> from mate_strategy.rules.predefined import Interval
 
         We first define a schema for the answer. In this case we ask for a random number and a

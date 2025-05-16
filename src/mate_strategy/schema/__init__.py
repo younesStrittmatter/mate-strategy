@@ -1,7 +1,7 @@
 from dataclasses import dataclass, fields
 from typing import get_type_hints, get_origin, get_args, Any, Callable, Tuple
 import json
-from src.mate_strategy.rules import Rule
+from mate_strategy.rules import Rule
 
 
 def constraint(path: str, desc: str, *, fix: Callable[[dict], None] | None = None):
@@ -20,7 +20,7 @@ class Schema:
         >>> import random
         >>> random.seed(42)  # for reproducible tests
 
-        We create a parseable class by subclassing :class:`Parseable` ...
+        We create a schmas class by subclassing :class:`Schema` ...
         >>> @dataclass
         ... class MySchema(Schema):
         ...     x: int
@@ -81,7 +81,7 @@ class Schema:
 
         We can also add more complicated rules.
         Either predefined
-        >>> from src.mate_strategy.rules.predefined import Interval, OneOf
+        >>> from mate_strategy.rules.predefined import Interval, OneOf
         >>> @dataclass
         ... class MySchema(Schema):
         ...    x: Interval[20, 100]  # bounded integer
@@ -140,7 +140,7 @@ class Schema:
         We can also create custom rules by providing
         a class that inherits from :class:`Rule` and implements the
         :meth:`describe`, :meth: `example`, and :meth:`validate` methods:
-        >>> from src.mate_strategy.rules import Rule
+        >>> from mate_strategy.rules import Rule
         >>> class MyRule(Rule):
         ...     @classmethod
         ...     def describe(cls):
@@ -206,7 +206,7 @@ class Schema:
         <BLANKLINE>
         Return **only** the JSON object — no code-fences, no comments.
 
-        ... parseables can also be nested:
+        ... schemas can also be nested:
         >>> @dataclass
         ... class OuterSchema(Schema):
         ...     a: MySchema
@@ -409,7 +409,7 @@ class Schema:
             return False
 
     @staticmethod
-    def _is_parseable(t):
+    def _is_schema(t):
         try:
             return issubclass(t, Schema)
         except TypeError:
@@ -449,11 +449,9 @@ class Schema:
             parts = ", ".join(_p)
             return f"must be a tuple ({parts})"
 
-        # nested Parseable -------------------------------------------------
-        if cls._is_parseable(cls._origin(typ)):
+        if cls._is_schema(cls._origin(typ)):
             return cls._origin(typ).__name__
 
-        # fallback ---------------------------------------------------------
         return str(typ)
 
     @classmethod
@@ -468,7 +466,7 @@ class Schema:
         if cls._is_tuple(typ):
             return [cls._example_for_type(t) for t in get_args(typ)]  # lists → valid JSON
 
-        if cls._is_parseable(cls._origin(typ)):
+        if cls._is_schema(cls._origin(typ)):
             return cls._origin(typ).example()
 
         if typ is str:
@@ -498,7 +496,7 @@ class Schema:
     def rules(cls, prefix: str = "") -> list[str]:
         """
         Build a fully nested rule list, including:
-            • per-field rules (scalar, list, tuple, nested Parseable, custom rule)
+            • per-field rules (scalar, list, tuple, nested Schema, custom rule)
             • @constraint-decorated cross-field rules, shown right after the
               field block they reference.
         """
@@ -524,21 +522,21 @@ class Schema:
                 # 2-b  normal per-field rule
                 lines.append(f"- {full} {cls._describe_type(typ)}")
 
-                # recurse into collections that contain Parseables
+                # recurse into collections that contain Schemas
                 if cls._is_list(typ):
                     elem = get_args(typ)[0]
-                    if cls._is_parseable(cls._origin(elem)):
+                    if cls._is_schema(cls._origin(elem)):
                         lines.extend(
                             f"  {l}" for l in cls._origin(elem).rules(full + "[].")
                         )
                 elif cls._is_tuple(typ):
                     for i, part in enumerate(get_args(typ)):
-                        if cls._is_parseable(cls._origin(part)):
+                        if cls._is_schema(cls._origin(part)):
                             lines.extend(
                                 f"  {l}" for l in cls._origin(part).rules(f"{full}[{i}].")
                             )
-                elif cls._is_parseable(cls._origin(typ)):
-                    # field *is* a Parseable → recurse
+                elif cls._is_schema(cls._origin(typ)):
+                    # field *is* a Schema → recurse
                     lines.extend(f"  {l}" for l in cls._origin(typ).rules(full + "."))
 
             # 2-c  add any constraints that start with this field
@@ -627,9 +625,9 @@ class Schema:
                     return err
             return None
 
-        # ───── 4️⃣  nested Parseables  ────────────────────────────────
+        # ───── 4️⃣  nested Schemas  ────────────────────────────────
         base = cls._origin(typ)
-        if cls._is_parseable(base):
+        if cls._is_schema(base):
             if not isinstance(val, dict):
                 return f'"{full}" must be an object', f'"{full}" must be an object'
             ok, *reason = base.validate_with_error(val)
