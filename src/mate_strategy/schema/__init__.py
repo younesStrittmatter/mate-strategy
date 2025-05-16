@@ -1,5 +1,5 @@
 from dataclasses import dataclass, fields
-from typing import get_type_hints, get_origin, get_args, Any, Callable, Tuple
+from typing import get_type_hints, get_origin, get_args, Any, Callable, Tuple, Union
 import json
 from mate_strategy.rules import Rule
 
@@ -179,12 +179,13 @@ class Schema:
         >>> MySchema.validate_with_error({"x": 2})
         (False, '"x" is invalid.', '"x" must be between 0 and 1 or be a string')
 
-        ... for all, we can use List or Tuples
+        ... for all, we can use List, Tuples and Unions
         >>> from typing import List
         >>> @dataclass
         ... class MySchema(Schema):
         ...     x: List[MyRule]
         ...     y: Tuple[int, str]
+        ...     z: Union[int, str]
 
         >>> print(MySchema.prompt()) # doctest: +NORMALIZE_WHITESPACE
         Fill in **valid JSON** for the fields below.
@@ -192,6 +193,7 @@ class Schema:
         Rules
         - x must be a list. An element of the list must be between 0 and 1 or be a string
         - y must be a tuple (el[0] must be a integer, el[1] must be a string)
+        - z must satisfy ONE of: must be a integer or must be a string
         <BLANKLINE>
         Example:
         {
@@ -201,7 +203,8 @@ class Schema:
           "y": [
             42,
             "example"
-          ]
+          ],
+          "z": 42
         }
         <BLANKLINE>
         Return **only** the JSON object — no code-fences, no comments.
@@ -219,6 +222,7 @@ class Schema:
         - a MySchema
           - a.x must be a list. An element of the list must be between 0 and 1 or be a string
           - a.y must be a tuple (el[0] must be a integer, el[1] must be a string)
+          - a.z must satisfy ONE of: must be a integer or must be a string
         - b must be a string
         <BLANKLINE>
         Example:
@@ -230,7 +234,8 @@ class Schema:
             "y": [
               42,
               "example"
-            ]
+            ],
+            "z": 42
           },
           "b": "example"
         }
@@ -239,7 +244,7 @@ class Schema:
 
 
         ... and we can validate this:
-        >>> OuterSchema.validate_with_error({"a": {"x": [0.5], "y": [42, "example"]}, "b": "example"})
+        >>> OuterSchema.validate_with_error({"a": {"x": [0.5], "y": [42, "example"], "z": "hi"}, "b": "example"})
         (True,)
 
         >>> OuterSchema.validate_with_error({"a": {"x": [0.5], "y": [42, 42]}, "b": "example"})
@@ -250,14 +255,15 @@ class Schema:
         The JSON below is invalid.
         <BLANKLINE>
         Problem:
-        - "z" is not a valid field.
+        - "x" is missing.
           Expected:
-         "z" is not expected here.
+         "x" must be present.
         <BLANKLINE>
         Rules:
         - a MySchema
           - a.x must be a list. An element of the list must be between 0 and 1 or be a string
           - a.y must be a tuple (el[0] must be a integer, el[1] must be a string)
+          - a.z must satisfy ONE of: must be a integer or must be a string
         - b must be a string
         <BLANKLINE>
         Current value (invalid):
@@ -277,6 +283,7 @@ class Schema:
         ```
         <BLANKLINE>
         Reply with **only** the corrected JSON object.
+
 
         ****************
         Cross Validation
@@ -379,6 +386,8 @@ class Schema:
         Return **only** the JSON object — no code-fences, no comments.
 
 
+
+
     """
     _declared_constraints: list[tuple[str, str, staticmethod]] = []
 
@@ -423,7 +432,11 @@ class Schema:
     def _is_tuple(t):
         return Schema._origin(t) is tuple
 
-    # ──────────────────────────────────────────────────────────────────────
+    @staticmethod
+    def _is_union(t):
+        return get_origin(t) is Union
+
+    # ──────────────────────────────────────────────────────────────────────z
 
     @classmethod
     def _describe_type(cls, typ: Any) -> str:
@@ -431,23 +444,29 @@ class Schema:
         if cls._is_rule(typ):
             return typ.describe()
 
-        # primitives -------------------------------------------------------
+        # primitives
         if typ in (str, int, float, bool):
             return \
                 {str: "must be a string", int: "must be a integer", float: "must be a float", bool: "must be boolean"}[
                     typ]
 
-        # list -------------------------------------------------------------
+        # list
         if cls._is_list(typ):
             elem = get_args(typ)[0] if get_args(typ) else Any
             return f"must be a list. An element of the list {cls._describe_type(elem)}"
 
-        # tuple ------------------------------------------------------------
+        # tuple
         if cls._is_tuple(typ):
             _descriptions = [cls._describe_type(t) for t in get_args(typ)]
             _p = [f'el[{i}] {_d}' for i, _d in enumerate(_descriptions)]
             parts = ", ".join(_p)
             return f"must be a tuple ({parts})"
+
+        # union
+        if cls._is_union(typ):
+            return "must satisfy ONE of: " + " or ".join(
+                cls._describe_type(t) for t in get_args(typ)
+            )
 
         if cls._is_schema(cls._origin(typ)):
             return cls._origin(typ).__name__
@@ -465,6 +484,11 @@ class Schema:
 
         if cls._is_tuple(typ):
             return [cls._example_for_type(t) for t in get_args(typ)]  # lists → valid JSON
+
+        if cls._is_union(typ):
+            # pick first alternative for deterministic example
+            first = get_args(typ)[0]
+            return cls._example_for_type(first)
 
         if cls._is_schema(cls._origin(typ)):
             return cls._origin(typ).example()
@@ -513,6 +537,9 @@ class Schema:
         for name, typ in cls._field_types().items():
             full = f"{prefix}{name}"
 
+            def _recurse(inner, path):
+                lines.extend(f"  {l}" for l in inner.rules(path))
+
             # 2-a  custom _infer_rule() override?
             custom = cls._infer_rule(name, typ)
             if isinstance(custom, Schema):
@@ -535,6 +562,10 @@ class Schema:
                             lines.extend(
                                 f"  {l}" for l in cls._origin(part).rules(f"{full}[{i}].")
                             )
+                elif cls._is_union(typ):
+                    for part in get_args(typ):
+                        if cls._is_schema(cls._origin(part)):
+                            _recurse(cls._origin(part), f"{full}[].")
                 elif cls._is_schema(cls._origin(typ)):
                     # field *is* a Schema → recurse
                     lines.extend(f"  {l}" for l in cls._origin(typ).rules(full + "."))
@@ -589,7 +620,7 @@ class Schema:
         """Return (err, expected) if invalid, else None."""
         full = f"{prefix}{key}"
 
-        # ───── 1 ️⃣  scalar rules  ─────────────────────────────────────
+        # 1 scalar rules
         if cls._is_rule(typ):
             if not typ.validate(val):
                 return (
@@ -598,7 +629,7 @@ class Schema:
                 )
             return None
 
-        # ───── 2️⃣  lists  ────────────────────────────────────────────
+        # 2 lists
         if cls._is_list(typ):
             if not isinstance(val, list):
                 return f'"{full}" must be a list, got {type(val).__name__}', f'"{full}" must be list'
@@ -609,7 +640,7 @@ class Schema:
                     return err
             return None
 
-        # ───── 3️⃣  tuples  ───────────────────────────────────────────
+        # 3 tuples
         if cls._is_tuple(typ):
             if not isinstance(val, (list, tuple)):
                 return f'"{full}" must be a tuple, got {type(val).__name__}', f'"{full}" must be tuple'
@@ -625,7 +656,20 @@ class Schema:
                     return err
             return None
 
-        # ───── 4️⃣  nested Schemas  ────────────────────────────────
+        # 4 union
+        if cls._is_union(typ):
+            expected_msgs = []
+            for alt in get_args(typ):
+                err = cls._validate_value(key, val, alt, prefix)
+                if err is None:
+                    return None
+                expected_msgs.append(err[1])
+            return (
+                f'"{full}" matches none of the allowed alternatives.',
+                " or ".join(expected_msgs),
+            )
+
+        # 5 nested Schemas
         base = cls._origin(typ)
         if cls._is_schema(base):
             if not isinstance(val, dict):
@@ -633,7 +677,7 @@ class Schema:
             ok, *reason = base.validate_with_error(val)
             return None if ok else reason  # (err, expected)
 
-        # ───── 5️⃣  primitives  ───────────────────────────────────────
+        # 6 primitives
         if typ is str and not isinstance(val, str):
             return f'"{full}" must be string', f'"{full}" must be string'
         if typ is int and not isinstance(val, int):
