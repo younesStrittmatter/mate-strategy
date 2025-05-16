@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from string import Formatter
 from typing import Type, Dict, Any
 import warnings
-from mate_strategy.parseable import Schema     # ← your new base
+from mate_strategy.schema import Schema     # ← your new base
 
 @dataclass
 class Prompt:
