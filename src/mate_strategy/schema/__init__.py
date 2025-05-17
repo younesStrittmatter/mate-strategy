@@ -822,28 +822,56 @@ class Schema:
                                 cls._origin(part).rules(f"{full}[{j}].", child_lvl)
                             )
 
+
+            # ────────────────────────────── Union[T, …] ────────────────────────────
+
             elif cls._is_union(typ):
+
                 lines.append(f"{IND2}• choose **one** of:")
 
+                # loop over alternatives *and* recurse immediately under each
+
                 for idx, alt in enumerate(get_args(typ), 1):
+
                     desc = cls._describe_type(alt).replace("\n", "\n" + IND3)
+
                     lines.append(f"{IND3}{idx}. {desc}")
 
-                # ───── recurse into any branch that contains a Schema ─────
-                # >>> NOTE: use _lvl+2 so the children appear *under* the union block
-                child_lvl = _lvl + 3
-                for branch in get_args(typ):
-                    if cls._is_schema(cls._origin(branch)):
-                        lines.extend(cls._origin(branch).rules(full + ".", child_lvl))
-                    elif cls._list_of_schema(branch):
-                        inner = cls._origin(get_args(branch)[0])
-                        lines.extend(inner.rules(full + "[].", child_lvl))
-                    elif cls._tuple_of_schema(branch):
-                        for j, part in enumerate(get_args(branch)):
+                    # nested rules should appear *under* this alternative
+
+                    child_lvl = _lvl + 3  # one indent deeper
+
+                    if cls._is_schema(cls._origin(alt)):
+
+                        lines.extend(
+
+                            cls._origin(alt).rules(full + ".", child_lvl)
+
+                        )
+
+                    elif cls._list_of_schema(alt):
+
+                        inner = cls._origin(get_args(alt)[0])
+
+                        lines.extend(
+
+                            inner.rules(full + "[].", child_lvl)
+
+                        )
+
+                    elif cls._tuple_of_schema(alt):
+
+                        for j, part in enumerate(get_args(alt)):
+
                             if cls._is_schema(cls._origin(part)):
                                 lines.extend(
-                                    cls._origin(part).rules(f"{full}[{j}].", child_lvl)
+
+                                    cls._origin(part).rules(f"{full}[{j}].",
+
+                                                            child_lvl)
+
                                 )
+
             # --- NON-UNION branch --------------------------------------------
             else:
                 desc = cls._describe_type(typ).replace("\n", "\n" + IND3)
