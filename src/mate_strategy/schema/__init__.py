@@ -1,7 +1,8 @@
 from dataclasses import dataclass, fields
 from typing import (get_type_hints, get_origin, get_args,
-                    Any, Callable, Tuple, Union, Optional)
-import json
+                    Any, Callable, Tuple, Union, Optional,
+                    Annotated)
+import json, inspect
 from mate_strategy.rules import Rule
 
 NoneType = type(None)
@@ -704,7 +705,9 @@ class Schema:
 
         # nested Schema
         if cls._is_schema(cls._origin(typ)):
-            return cls._origin(typ).__name__
+            target = cls._origin(typ)
+            head = getattr(target, "_doc_header", "")
+            return f"{target.__name__}" + (f"  – {head}" if head else "")
 
         return str(typ)
 
@@ -791,13 +794,22 @@ class Schema:
                 inner = next(t for t in get_args(typ) if t is not NoneType)
                 desc = cls._describe_type(inner).replace("\n", "\n" + IND3)
 
-                # show that the field may be omitted *or* set to null/inner-value
+                # headline for an optional field
                 lines.append(f"{IND2}• (Optional) Key can be *missing* or:")
                 lines.append(f"{IND3}- {desc}")  # the real value
-                lines.append(f"{IND3}- None")  # the real value
+                lines.append(f"{IND3}- None")  # explicit null
 
+                # ――― NEW: append the note (if any) ―――
+                note = ""
+                if get_origin(inner) is Annotated:  # e.g. Annotated[int, "note"]
+                    _, note = get_args(inner)
+                elif issubclass(cls, AnnotatedSchema):  # doc-string note
+                    note = cls._field_notes.get(name, "")
 
-                # ---- recurse if the *inner* itself is / contains Schemas ----
+                if note:
+                    lines.append(f"{IND3}– {note}")
+
+                    # ---- recurse if the *inner* itself is / contains Schemas ----
                 child_lvl = _lvl + 2
                 if cls._is_schema(cls._origin(inner)):
                     lines.extend(cls._origin(inner).rules(full + ".", child_lvl))
@@ -1064,3 +1076,194 @@ class Schema:
                     f'"{path}" {desc}',
                 )
         return True,
+
+
+# ---------------------------------------------------------------------
+#  AnnotatedSchema  –  opt-in “Schema with doc-string annotations”
+# ---------------------------------------------------------------------
+# ---------------------------------------------------------------------
+def _field_note(owner_cls: type, field_name: str) -> str:
+    """
+    Return the explanatory note for `field_name`   ('' if none).
+
+    Only works when the owner is an AnnotatedSchema; plain Schema
+    subclasses are unaffected.
+    """
+    if issubclass(owner_cls, AnnotatedSchema):
+        return owner_cls._field_notes.get(field_name, "")
+    return ""
+
+
+import inspect
+from typing import Annotated   # stdlib, already available
+
+class AnnotatedSchema(Schema):
+    """
+    Extend :class:`Schema` with human-readable annotations.
+
+    Put them directly in the subclass doc-string:
+
+      • *first* non-blank line ...... → short header
+      • lines like “field: note …” .. → per-field note
+
+    Example
+    -------
+    >>> @dataclass
+    ... class LevelSchema(AnnotatedSchema):
+    ...     '''
+    ...     Single level in a factorial design
+    ...
+    ...     name  : The concrete value (e.g. "red")
+    ...     weight: Optional repetition weight
+    ...     '''
+    ...     name  : str
+    ...     weight: Optional[int]
+    ...
+    >>> print(LevelSchema.prompt())       # doctest:+NORMALIZE_WHITESPACE
+    Fill in **valid JSON** for the fields below. – **Single level in a factorial design**
+    <BLANKLINE>
+    Rules
+    - name  – The concrete value (e.g. "red")
+      • string
+        (ex: "example")
+    - weight  – Optional repetition weight
+      • (Optional) Key can be *missing* or:
+        - integer
+        - None
+        – Optional repetition weight
+    <BLANKLINE>
+    Example:
+    {
+      "name": "example",
+      "weight": 42
+    }
+    <BLANKLINE>
+    Return **only** the JSON object — no code-fences, no comments.
+
+    >>> @dataclass
+    ... class OuterSchema(AnnotatedSchema):
+    ...     '''
+    ...     Outer level in a factorial design
+    ...
+    ...     inner  : Single level in a factorial design
+    ...     weight: Optional repetition weight
+    ...     '''
+    ...     inner  : LevelSchema
+    ...     weight: Optional[int]
+    ...
+    >>> print(OuterSchema.prompt()) # doctest:+NORMALIZE_WHITESPACE
+    Fill in **valid JSON** for the fields below. – **Outer level in a factorial design**
+    <BLANKLINE>
+    Rules
+    - inner  – Single level in a factorial design
+      • LevelSchema – Single level in a factorial design
+      - inner.name
+        • string
+          (ex: "example")
+      - inner.weight
+        • (Optional) Key can be *missing* or:
+          - integer
+          - None
+          – Optional repetition weight
+    - weight  – Optional repetition weight
+      • (Optional) Key can be *missing* or:
+        - integer
+        - None
+        – Optional repetition weight
+    <BLANKLINE>
+    Example:
+    {
+      "inner": {
+        "name": "example",
+        "weight": 42
+      },
+      "weight": 42
+    }
+    <BLANKLINE>
+    Return **only** the JSON object — no code-fences, no comments.
+    """
+
+    # parsed once per subclass -----------------------------------------
+    _doc_header: str          = ""
+    _field_notes: dict[str, str] = {}
+
+    # -----------------------  meta-processing  ------------------------
+    def __init_subclass__(cls):
+        super().__init_subclass__()          # keep Schema setup first
+
+        doc = inspect.getdoc(cls) or ""
+        if not doc:
+            return                           # nothing to parse
+
+        lines = [l.rstrip() for l in doc.splitlines()]
+
+        # header  = first non-blank line
+        for ln in lines:
+            if ln.strip():
+                cls._doc_header = ln.strip()
+                break
+
+        # “field: note”  or  “field – note”
+        cls._field_notes = {}
+        for ln in lines:
+            if ":" in ln:
+                field, note = ln.split(":", 1)
+                cls._field_notes[field.strip()] = note.strip()
+            elif "–" in ln:
+                field, note = ln.split("–", 1)
+                cls._field_notes[field.strip()] = note.strip()
+
+    # ------------------------  cosmetic layer  ------------------------
+    @classmethod
+    def _describe_type(cls, typ: Any) -> str:
+        """
+        Just like Schema._describe_type, but if *typ* itself is a Schema
+        that has a doc_header we append “ – header”.
+        """
+        if cls._is_schema(cls._origin(typ)):
+            base = cls._origin(typ)
+            hdr  = getattr(base, "_doc_header", "")
+            return f"{base.__name__} – {hdr}" if hdr else base.__name__
+        # otherwise defer to the parent implementation
+        return super()._describe_type(typ)
+
+    # ------------------------------------------------------------------
+    @classmethod
+    def rules(cls, prefix: str = "", _lvl: int = 0) -> list[str]:
+        """
+        Start with Schema.rules() then inject the per-field notes on the
+        label lines that belong to *this* schema (no need to touch deep
+        recursion logic).
+        """
+        lines = super().rules(prefix, _lvl)
+        IND   = "  " * _lvl
+
+        # only patch top-level fields of *this* class (prefix == '')
+        if prefix:
+            return lines
+
+        patched = []
+        for ln in lines:
+            if ln.startswith(f"{IND}- "):
+                # extract the raw field name after the dash and spaces
+                field = ln[len(IND) + 2:].split()[0]
+                note  = _field_note(cls, field)
+                if note:
+                    ln = f"{ln}  – {note}"
+            patched.append(ln)
+        return patched
+
+    # ------------------------------------------------------------------
+    @classmethod
+    def prompt(cls) -> str:
+        lead = "Fill in **valid JSON** for the fields below."
+        if cls._doc_header:
+            lead += f" – **{cls._doc_header}**"
+
+        return (
+            f"{lead}\n\nRules\n"
+            + "\n".join(cls.rules())
+            + "\n\nExample:\n"
+            + json.dumps(cls.example(), indent=2)
+            + "\n\nReturn **only** the JSON object — no code-fences, no comments."
+        )
