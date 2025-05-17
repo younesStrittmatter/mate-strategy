@@ -806,8 +806,7 @@ class Schema:
                 elif issubclass(cls, AnnotatedSchema):  # doc-string note
                     note = cls._field_notes.get(name, "")
 
-                if note:
-                    lines.append(f"{IND3}– {note}")
+
 
                     # ---- recurse if the *inner* itself is / contains Schemas ----
                 child_lvl = _lvl + 2
@@ -1077,21 +1076,38 @@ class Schema:
                 )
         return True,
 
+def _note_for_path(root_cls, parts):
+    """
+    Follow `parts` (['inner', 'name', …]) down through nested
+    AnnotatedSchema classes and return the first matching note.
+    """
+    if not parts or not (inspect.isclass(root_cls)
+                         and issubclass(root_cls, AnnotatedSchema)):
+        return None
+
+    field, *rest = parts
+    note = getattr(root_cls, "_field_notes", {}).get(field)
+
+    if not rest:
+        return note
+
+    typ = root_cls.__annotations__.get(field)
+    if typ is None:
+        return note
+
+    origin = get_origin(typ) or typ          # unwrap List[T] / Optional[T]
+    return _note_for_path(origin, rest) or note
 
 # ---------------------------------------------------------------------
 #  AnnotatedSchema  –  opt-in “Schema with doc-string annotations”
 # ---------------------------------------------------------------------
 # ---------------------------------------------------------------------
-def _field_note(owner_cls: type, field_name: str) -> str:
-    """
-    Return the explanatory note for `field_name`   ('' if none).
-
-    Only works when the owner is an AnnotatedSchema; plain Schema
-    subclasses are unaffected.
-    """
-    if issubclass(owner_cls, AnnotatedSchema):
-        return owner_cls._field_notes.get(field_name, "")
-    return ""
+def _field_note(owner_cls, field: str) -> str | None:
+    if not inspect.isclass(owner_cls):
+        return None
+    if not issubclass(owner_cls, AnnotatedSchema):
+        return None
+    return getattr(owner_cls, "_field_notes", {}).get(field)
 
 
 import inspect
@@ -1130,7 +1146,6 @@ class AnnotatedSchema(Schema):
       • (Optional) Key can be *missing* or:
         - integer
         - None
-        – Optional repetition weight
     <BLANKLINE>
     Example:
     {
@@ -1157,19 +1172,17 @@ class AnnotatedSchema(Schema):
     Rules
     - inner  – Single level in a factorial design
       • LevelSchema – Single level in a factorial design
-      - inner.name
+      - inner.name  – The concrete value (e.g. "red")
         • string
           (ex: "example")
-      - inner.weight
+      - inner.weight  – Optional repetition weight
         • (Optional) Key can be *missing* or:
           - integer
           - None
-          – Optional repetition weight
     - weight  – Optional repetition weight
       • (Optional) Key can be *missing* or:
         - integer
         - None
-        – Optional repetition weight
     <BLANKLINE>
     Example:
     {
@@ -1227,28 +1240,34 @@ class AnnotatedSchema(Schema):
         # otherwise defer to the parent implementation
         return super()._describe_type(typ)
 
+    @classmethod
+    def _describe_optional(cls, typ):
+        """
+        Pretty-print Optional[T] without appending the field-note again.
+        """
+        inner = cls._unwrap_optional(typ)
+
+        # get the *type* portion before any " – note"
+        inner_desc = cls._describe_type(inner).split(" – ")[0]
+
+        return [
+            "• (Optional) Key can be *missing* or:",
+            f"  - {inner_desc}",
+            "  - None",
+        ]
+
     # ------------------------------------------------------------------
     @classmethod
     def rules(cls, prefix: str = "", _lvl: int = 0) -> list[str]:
-        """
-        Start with Schema.rules() then inject the per-field notes on the
-        label lines that belong to *this* schema (no need to touch deep
-        recursion logic).
-        """
         lines = super().rules(prefix, _lvl)
-        IND   = "  " * _lvl
-
-        # only patch top-level fields of *this* class (prefix == '')
-        if prefix:
-            return lines
 
         patched = []
         for ln in lines:
-            if ln.startswith(f"{IND}- "):
-                # extract the raw field name after the dash and spaces
-                field = ln[len(IND) + 2:].split()[0]
-                note  = _field_note(cls, field)
-                if note:
+            stripped = ln.lstrip()  # works even when indented
+            if stripped.startswith("- "):
+                full_field = stripped[2:].split()[0]  # inner.name …
+                note = _note_for_path(cls, full_field.split("."))
+                if note and " – " not in ln:  # no double-patch
                     ln = f"{ln}  – {note}"
             patched.append(ln)
         return patched
