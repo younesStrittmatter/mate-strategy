@@ -279,9 +279,9 @@ class Schema:
         <BLANKLINE>
         Rules
         - a
-          • choose **one** of:
-            1. integer
-            2. <class 'NoneType'>
+          • (Optional) Key can be *missing* or:
+            - integer
+            - None
         - b
           • integer
             (ex: 42)
@@ -786,9 +786,34 @@ class Schema:
             # label
             lines.append(f"{IND}- {full}")
 
-            # --- UNION branch -------------------------------------------------
-            if cls._is_union(typ):
+            if cls._is_optional(typ):
+                # inner type ≠ NoneType
+                inner = next(t for t in get_args(typ) if t is not NoneType)
+                desc = cls._describe_type(inner).replace("\n", "\n" + IND3)
+
+                # show that the field may be omitted *or* set to null/inner-value
+                lines.append(f"{IND2}• (Optional) Key can be *missing* or:")
+                lines.append(f"{IND3}- {desc}")  # the real value
+                lines.append(f"{IND3}- None")  # the real value
+
+
+                # ---- recurse if the *inner* itself is / contains Schemas ----
+                child_lvl = _lvl + 2
+                if cls._is_schema(cls._origin(inner)):
+                    lines.extend(cls._origin(inner).rules(full + ".", child_lvl))
+                elif cls._list_of_schema(inner):
+                    inner_schema = cls._origin(get_args(inner)[0])
+                    lines.extend(inner_schema.rules(full + "[].", child_lvl))
+                elif cls._tuple_of_schema(inner):
+                    for j, part in enumerate(get_args(inner)):
+                        if cls._is_schema(cls._origin(part)):
+                            lines.extend(
+                                cls._origin(part).rules(f"{full}[{j}].", child_lvl)
+                            )
+
+            elif cls._is_union(typ):
                 lines.append(f"{IND2}• choose **one** of:")
+
                 for idx, alt in enumerate(get_args(typ), 1):
                     desc = cls._describe_type(alt).replace("\n", "\n" + IND3)
                     lines.append(f"{IND3}{idx}. {desc}")
