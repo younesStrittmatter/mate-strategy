@@ -831,7 +831,7 @@ class Schema:
 
                 # ───── recurse into any branch that contains a Schema ─────
                 # >>> NOTE: use _lvl+2 so the children appear *under* the union block
-                child_lvl = _lvl + 2
+                child_lvl = _lvl + 3
                 for branch in get_args(typ):
                     if cls._is_schema(cls._origin(branch)):
                         lines.extend(cls._origin(branch).rules(full + ".", child_lvl))
