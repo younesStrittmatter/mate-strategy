@@ -15,6 +15,20 @@ def constraint(path: str, desc: str, *, fix: Callable[[dict], None] | None = Non
     return wrap
 
 
+# helper for bullet-style indent
+def _indent(level): return "  " * level
+
+
+def _list_of_schema(t):
+    return Schema._is_list(t) and Schema._is_schema(Schema._origin(get_args(t)[0]))
+
+
+def _tuple_of_schema(t):
+    return Schema._is_tuple(t) and any(
+        Schema._is_schema(Schema._origin(a)) for a in get_args(t)
+    )
+
+
 class Schema:
     """
     A class that can emit a prompt and validate a JSON object.
@@ -34,8 +48,10 @@ class Schema:
         Fill in **valid JSON** for the fields below.
         <BLANKLINE>
         Rules
-        - x must be a integer
-        - y must be a string
+        - x
+            • integer      (ex: 42)
+        - y
+            • string      (ex: "example")
         <BLANKLINE>
         Example:
         {
@@ -62,11 +78,14 @@ class Schema:
         <BLANKLINE>
         Problem:
         - "y" must be string
-          Expected: "y" must be string
+          Expected:
+         "y" must be string
         <BLANKLINE>
         Rules:
-        - x must be a integer
-        - y must be a string
+        - x
+            • integer      (ex: 42)
+        - y
+            • string      (ex: "example")
         <BLANKLINE>
         Current value (invalid):
         ```json
@@ -95,13 +114,15 @@ class Schema:
         Fill in **valid JSON** for the fields below.
         <BLANKLINE>
         Rules
-        - x must be a number between 20 and 100
-        - y must be one of 'green', 'red', 'blue'
+        - x
+            • must be a number between 20 and 100      (ex: 60)
+        - y
+            • must be one of 'green', 'red', 'blue'      (ex: "blue")
         <BLANKLINE>
         Example:
         {
           "x": 60,
-          "y": "blue"
+          "y": "green"
         }
         <BLANKLINE>
         Return **only** the JSON object — no code-fences, no comments.
@@ -124,8 +145,10 @@ class Schema:
          "y" must be one of 'green', 'red', 'blue'
         <BLANKLINE>
         Rules:
-        - x must be a number between 20 and 100
-        - y must be one of 'green', 'red', 'blue'
+        - x
+            • must be a number between 20 and 100      (ex: 60)
+        - y
+            • must be one of 'green', 'red', 'blue'      (ex: "green")
         <BLANKLINE>
         Current value (invalid):
         ```json
@@ -147,13 +170,13 @@ class Schema:
         >>> class MyRule(Rule):
         ...     @classmethod
         ...     def describe(cls):
-        ...         return "must be between 0 and 1 or be a string"
+        ...         return "must be between 0 and 1 or between 2 and 3"
         ...     @classmethod
         ...     def example(cls):
-        ...         return random.choice([random.random(), "example"])
+        ...         return random.choice([random.random(), random.random() + 2])
         ...     @classmethod
         ...     def validate(cls, v):
-        ...         return isinstance(v, str) or 0 <= v <= 1
+        ...         return 0 <= v <= 1 or 2 <= v <= 3
 
         we can use this in the schema just as any other rule:
         >>> @dataclass
@@ -164,11 +187,13 @@ class Schema:
         Fill in **valid JSON** for the fields below.
         <BLANKLINE>
         Rules
-        - x must be between 0 and 1 or be a string
+        - x
+            • must be between 0 and 1 or between 2 and 3
+              (ex: 0.74155049…)
         <BLANKLINE>
         Example:
         {
-          "x": "example"
+          "x": 0.7364712141640124
         }
         <BLANKLINE>
         Return **only** the JSON object — no code-fences, no comments.
@@ -176,11 +201,11 @@ class Schema:
         >>> MySchema.validate_with_error({"x": 0.5})
         (True,)
 
-        >>> MySchema.validate_with_error({"x": "example"})
+        >>> MySchema.validate_with_error({"x": 2.5})
         (True,)
 
-        >>> MySchema.validate_with_error({"x": 2})
-        (False, '"x" is invalid.', '"x" must be between 0 and 1 or be a string')
+        >>> MySchema.validate_with_error({"x": 1.5})
+        (False, '"x" is invalid.', '"x" must be between 0 and 1 or between 2 and 3')
 
         ... for all, we can use List, Tuples, Unions or Optional
         >>> from typing import List, Tuple, Union, Optional
@@ -203,7 +228,9 @@ class Schema:
         Fill in **valid JSON** for the fields below.
         <BLANKLINE>
         Rules
-        - a must be a list. An element of the list must be a integer
+        - a
+            • list of integers
+              (ex: [42])
         <BLANKLINE>
         Example:
         {
@@ -218,7 +245,8 @@ class Schema:
         Fill in **valid JSON** for the fields below.
         <BLANKLINE>
         Rules
-        - a must be a tuple (el[0] must be a integer, el[1] must be a integer)
+        - a
+            • tuple ⟨el[0] integer, el[1] integer⟩
         <BLANKLINE>
         Example:
         {
@@ -234,7 +262,10 @@ class Schema:
         Fill in **valid JSON** for the fields below.
         <BLANKLINE>
         Rules
-        - a must satisfy ONE of: must be a integer or must be a string
+        - a
+            • choose **one** of:
+                        1. integer
+                        2. string
         <BLANKLINE>
         Example:
         {
@@ -247,8 +278,13 @@ class Schema:
         Fill in **valid JSON** for the fields below.
         <BLANKLINE>
         Rules
-        - a (optional) must be a integer can be missing
-        - b must be a integer
+        - a
+          • choose **one** of:
+            1. integer
+            2. <class 'NoneType'>
+        - b
+          • integer
+            (ex: 42)
         <BLANKLINE>
         Example:
         {
@@ -306,14 +342,20 @@ class Schema:
         Fill in **valid JSON** for the fields below.
         <BLANKLINE>
         Rules
-        - x must be a list. An element of the list must be between 0 and 1 or be a string
-        - y must be a tuple (el[0] must be a integer, el[1] must be a string)
-        - z must satisfy ONE of: must be a integer or must be a string
+        - x
+            • list of must be between 0 and 1 or between 2 and 3s
+              (ex: [0.5904925…)
+        - y
+            • tuple ⟨el[0] integer, el[1] string⟩
+        - z
+            • choose **one** of:
+                        1. integer
+                        2. string
         <BLANKLINE>
         Example:
         {
           "x": [
-            0.24489185380347622
+            0.21863797480360336
           ],
           "y": [
             42,
@@ -334,17 +376,26 @@ class Schema:
         Fill in **valid JSON** for the fields below.
         <BLANKLINE>
         Rules
-        - a MySchema
-          - a.x must be a list. An element of the list must be between 0 and 1 or be a string
-          - a.y must be a tuple (el[0] must be a integer, el[1] must be a string)
-          - a.z must satisfy ONE of: must be a integer or must be a string
-        - b must be a string
+        - a
+            • MySchema
+          - a.x
+              • list of must be between 0 and 1 or between 2 and 3s
+                (ex: [2.7160196…)
+          - a.y
+              • tuple ⟨el[0] integer, el[1] string⟩
+          - a.z
+              • choose **one** of:
+                        1. integer
+                        2. string
+        - b
+            • string
+              (ex: "example")
         <BLANKLINE>
         Example:
         {
           "a": {
             "x": [
-              0.7364712141640124
+              0.2204406220406967
             ],
             "y": [
               42,
@@ -362,23 +413,32 @@ class Schema:
         (True,)
 
         >>> OuterSchema.validate_with_error({"a": {"x": [0.5], "y": [42, 42]}, "b": "example"})
-        (False, '"y[1]" must be string', '"y[1]" must be string')
+        (False, '"a.y[1]" must be string', '"a.y[1]" must be string')
 
         ... and get a repair prompt:
         >>> print(OuterSchema.repair_prompt({"a": {"z": [0.5], "y": [42, 42]}, "b": "example"}))  # doctest: +NORMALIZE_WHITESPACE
         The JSON below is invalid.
         <BLANKLINE>
         Problem:
-        - "x" is missing.
+        - "a.x" is missing.
           Expected:
-         "x" must be present.
+         "a.x" must be present.
         <BLANKLINE>
         Rules:
-        - a MySchema
-          - a.x must be a list. An element of the list must be between 0 and 1 or be a string
-          - a.y must be a tuple (el[0] must be a integer, el[1] must be a string)
-          - a.z must satisfy ONE of: must be a integer or must be a string
-        - b must be a string
+        - a
+            • MySchema
+          - a.x
+              • list of must be between 0 and 1 or between 2 and 3s
+                (ex: [2.1596593…)
+          - a.y
+              • tuple ⟨el[0] integer, el[1] string⟩
+          - a.z
+              • choose **one** of:
+                        1. integer
+                        2. string
+        - b
+            • string
+              (ex: "example")
         <BLANKLINE>
         Current value (invalid):
         ```json
@@ -398,6 +458,34 @@ class Schema:
         <BLANKLINE>
         Reply with **only** the corrected JSON object.
 
+        ... this  also works with Unions (Lists, ...):
+        >>> @dataclass
+        ... class OuterSchema(Schema):
+        ...     x: Union[MyRule, List[MySchema]]
+        >>> print(OuterSchema.prompt()) # doctest: +NORMALIZE_WHITESPACE
+        Fill in **valid JSON** for the fields below.
+        <BLANKLINE>
+        Rules
+        - x
+          • choose **one** of:
+            1. must be between 0 and 1 or between 2 and 3
+            2. list of MySchema
+            - x[].x
+              • list of must be between 0 and 1 or between 2 and 3s
+                (ex: [2.1554794…)
+            - x[].y
+              • tuple ⟨el[0] integer, el[1] string⟩
+            - x[].z
+              • choose **one** of:
+                1. integer
+                2. string
+        <BLANKLINE>
+        Example:
+        {
+          "x": 2.3799273006373376
+        }
+        <BLANKLINE>
+        Return **only** the JSON object — no code-fences, no comments.
 
         ****************
         Cross Validation
@@ -421,9 +509,13 @@ class Schema:
         Fill in **valid JSON** for the fields below.
         <BLANKLINE>
         Rules
-        - x must be a integer
-        - y must be a integer
-        - y must be odd if x is even and vice versa
+        - x
+          • integer
+            (ex: 42)
+        - y
+          • integer
+            (ex: 42)
+          - y must be odd if x is even and vice versa
         <BLANKLINE>
         Example:
         {
@@ -455,9 +547,13 @@ class Schema:
         Fill in **valid JSON** for the fields below.
         <BLANKLINE>
         Rules
-        - x must be a integer
-        - y must be a integer
-        - y must be odd if x is even and vice versa
+        - x
+          • integer
+            (ex: 42)
+        - y
+          • integer
+            (ex: 42)
+          - y must be odd if x is even and vice versa
         <BLANKLINE>
         Example:
         {
@@ -488,8 +584,12 @@ class Schema:
         Fill in **valid JSON** for the fields below.
         <BLANKLINE>
         Rules
-        - x must be a integer
-        - y must be a integer
+        - x
+          • integer
+            (ex: 42)
+        - y
+          • integer
+            (ex: 42)
         <BLANKLINE>
         Example:
         {
@@ -498,11 +598,6 @@ class Schema:
         }
         <BLANKLINE>
         Return **only** the JSON object — no code-fences, no comments.
-
-
-
-
-
 
     """
     _declared_constraints: list[tuple[str, str, staticmethod]] = []
@@ -549,6 +644,18 @@ class Schema:
         return Schema._origin(t) is tuple
 
     @staticmethod
+    def _list_of_schema(t):
+        return Schema._is_list(t) and Schema._is_schema(
+            Schema._origin(get_args(t)[0])
+        )
+
+    @staticmethod
+    def _tuple_of_schema(t):
+        return Schema._is_tuple(t) and any(
+            Schema._is_schema(Schema._origin(a)) for a in get_args(t)
+        )
+
+    @staticmethod
     def _is_union(t):
         return get_origin(t) is Union
 
@@ -560,39 +667,42 @@ class Schema:
 
     @classmethod
     def _describe_type(cls, typ: Any) -> str:
-        # scalar Rule ------------------------------------------------------
         if cls._is_rule(typ):
-            return typ.describe()
+            return cls._origin(typ).describe()
 
         # primitives
         if typ in (str, int, float, bool):
-            return \
-                {str: "must be a string", int: "must be a integer", float: "must be a float", bool: "must be boolean"}[
-                    typ]
+            return {str: "string", int: "integer",
+                    float: "float", bool: "boolean"}[typ]
 
         # list
         if cls._is_list(typ):
-            elem = get_args(typ)[0] if get_args(typ) else Any
-            return f"must be a list. An element of the list {cls._describe_type(elem)}"
+            elem = get_args(typ)[0]
+            if cls._is_schema(cls._origin(elem)):
+                return f"list of {cls._origin(elem).__name__}"
+            return f"list of {cls._describe_type(elem)}s"
 
         # tuple
         if cls._is_tuple(typ):
-            _descriptions = [cls._describe_type(t) for t in get_args(typ)]
-            _p = [f'el[{i}] {_d}' for i, _d in enumerate(_descriptions)]
-            parts = ", ".join(_p)
-            return f"must be a tuple ({parts})"
+            parts = ", ".join(
+                f"el[{i}] {cls._describe_type(t)}"
+                for i, t in enumerate(get_args(typ))
+            )
+            return f"tuple ⟨{parts}⟩"
 
         # optional
         if cls._is_optional(typ):
-            non_none = next(t for t in get_args(typ) if t is not NoneType)
-            return f"(optional) {cls._describe_type(non_none)} can be missing"
+            inner = next(t for t in get_args(typ) if t is not NoneType)
+            return f"(optional) {cls._describe_type(inner)}"
 
-        # union
+        # union  → numbered list, each line already indented five levels
         if cls._is_union(typ):
-            return "must satisfy ONE of: " + " or ".join(
-                cls._describe_type(t) for t in get_args(typ)
-            )
+            alts = [cls._describe_type(t) for t in get_args(typ)]
+            return ("choose **one** of:\n" +
+                    "\n".join(f"{_indent(5)}{i + 1}. {d}"
+                              for i, d in enumerate(alts)))
 
+        # nested Schema
         if cls._is_schema(cls._origin(typ)):
             return cls._origin(typ).__name__
 
@@ -645,69 +755,90 @@ class Schema:
 
     # ────────────────────────── rendering ───────────────────────────
 
+    # ────────────────────────── rendering ───────────────────────────
+    # ────────────────────────── rendering ───────────────────────────
     @classmethod
-    def rules(cls, prefix: str = "") -> list[str]:
-        """
-        Build a fully nested rule list, including:
-            • per-field rules (scalar, list, tuple, nested Schema, custom rule)
-            • @constraint-decorated cross-field rules, shown right after the
-              field block they reference.
-        """
+    def rules(cls, prefix: str = "", _lvl: int = 0) -> list[str]:
+        """Produce a pretty, fully-nested rule list.
+
+        `_lvl` is the current indentation level (0 for top-level).  Each level
+        indents two spaces; nested items simply call `rules(..., _lvl+1)`."""
+        IND = "  " * _lvl
         lines: list[str] = []
 
-        # ── 1. bucket constraints by their top-level key ──────────────────
-        constraints_by_head: dict[str, list[tuple[str, str]]] = {}
-        for path, desc, _, _ in cls._declared_constraints:
+        # -------- collect @constraint rules grouped by their first key -------
+        grouped: dict[str, list[tuple[str, str]]] = {}
+        for path, desc, *_ in cls._declared_constraints:
             head, *rest = path.split(".", 1)
-            tail = rest[0] if rest else ""  # "" means constraint on the head itself
-            constraints_by_head.setdefault(head, []).append((tail, desc))
+            grouped.setdefault(head, []).append((".".join(rest), desc))
 
-        # ── 2. walk dataclass fields in declared order ────────────────────
+        # -------- helper to append child-schema rules -------------------------
+        def _emit_child(inner_cls, child_prefix: str):
+            for l in inner_cls.rules(child_prefix, _lvl + 1):
+                lines.append(l)
+
+        # ---------------------------------------------------------------------
         for name, typ in cls._field_types().items():
             full = f"{prefix}{name}"
+            IND2 = IND + "  "  # one level deeper
+            IND3 = IND + "    "  # two levels deeper
 
-            def _recurse(inner, path):
-                lines.extend(f"  {l}" for l in inner.rules(path))
+            # label
+            lines.append(f"{IND}- {full}")
 
-            # 2-a  custom _infer_rule() override?
-            custom = cls._infer_rule(name, typ)
-            if isinstance(custom, Schema):
-                lines.append(f"- {full} is a {custom.__class__.__name__}")
-                lines.extend(f"  {l}" for l in custom.rules(full + "."))
+            # --- UNION branch -------------------------------------------------
+            if cls._is_union(typ):
+                lines.append(f"{IND2}• choose **one** of:")
+                for idx, alt in enumerate(get_args(typ), 1):
+                    desc = cls._describe_type(alt).replace("\n", "\n" + IND3)
+                    lines.append(f"{IND3}{idx}. {desc}")
+
+                # ───── recurse into any branch that contains a Schema ─────
+                # >>> NOTE: use _lvl+2 so the children appear *under* the union block
+                child_lvl = _lvl + 2
+                for branch in get_args(typ):
+                    if cls._is_schema(cls._origin(branch)):
+                        lines.extend(cls._origin(branch).rules(full + ".", child_lvl))
+                    elif cls._list_of_schema(branch):
+                        inner = cls._origin(get_args(branch)[0])
+                        lines.extend(inner.rules(full + "[].", child_lvl))
+                    elif cls._tuple_of_schema(branch):
+                        for j, part in enumerate(get_args(branch)):
+                            if cls._is_schema(cls._origin(part)):
+                                lines.extend(
+                                    cls._origin(part).rules(f"{full}[{j}].", child_lvl)
+                                )
+            # --- NON-UNION branch --------------------------------------------
             else:
-                # 2-b  normal per-field rule
-                lines.append(f"- {full} {cls._describe_type(typ)}")
+                desc = cls._describe_type(typ).replace("\n", "\n" + IND3)
+                lines.append(f"{IND2}• {desc}")
 
-                # recurse into collections that contain Schemas
-                if cls._is_list(typ):
-                    elem = get_args(typ)[0]
-                    if cls._is_schema(cls._origin(elem)):
-                        lines.extend(
-                            f"  {l}" for l in cls._origin(elem).rules(full + "[].")
-                        )
+                # micro-example for primitive / simple list only
+                if (not cls._is_schema(cls._origin(typ))
+                        and not cls._is_tuple(typ)
+                        and not (cls._is_list(typ)
+                                 and cls._is_schema(cls._origin(get_args(typ)[0])))):
+                    ex = json.dumps(cls._example_for_type(typ))[:10]
+                    lines.append(f"{IND3}(ex: {ex}{'…' if len(ex) == 10 else ''})")
+
+                # recurse into nested Schemas
+                if cls._is_schema(cls._origin(typ)):
+                    _emit_child(cls._origin(typ), full + ".")
+                elif cls._is_list(typ) and cls._is_schema(cls._origin(get_args(typ)[0])):
+                    _emit_child(cls._origin(get_args(typ)[0]), full + "[].")
                 elif cls._is_tuple(typ):
                     for i, part in enumerate(get_args(typ)):
                         if cls._is_schema(cls._origin(part)):
-                            lines.extend(
-                                f"  {l}" for l in cls._origin(part).rules(f"{full}[{i}].")
-                            )
-                elif cls._is_union(typ):
-                    for part in get_args(typ):
-                        if cls._is_schema(cls._origin(part)):
-                            _recurse(cls._origin(part), f"{full}[].")
-                elif cls._is_schema(cls._origin(typ)):
-                    # field *is* a Schema → recurse
-                    lines.extend(f"  {l}" for l in cls._origin(typ).rules(full + "."))
+                            _emit_child(cls._origin(part), f"{full}[{i}].")
 
-            # 2-c  add any constraints that start with this field
-            for tail, desc in constraints_by_head.get(name, []):
-                indent = "  " if tail else ""
-                path = f"{full}.{tail}" if tail else full
-                lines.append(f"{indent}- {path} {desc}")
+            # inline constraints anchored at this head
+            for tail, desc in grouped.get(name, []):
+                p = f"{full}.{tail}" if tail else full
+                lines.append(f"{IND2}- {p} {desc}")
 
-        # ── 3. constraints on the *whole object* (no head) ────────────────
-        for tail, desc in constraints_by_head.get("", []):
-            lines.append(f"- {desc}")  # path == whole object; indent 0
+        # object-level constraints (no head key)
+        for tail, desc in grouped.get("", []):
+            lines.append(f"{IND}- {desc}")
 
         return lines
 
@@ -744,24 +875,31 @@ class Schema:
         )
 
     # ────────────────────────── validation ─────────────────────────
+    # ────────────────────────── validation helper ─────────────────────────
     @classmethod
-    def _validate_value(cls, key: str, val, typ: Any, prefix=""):
-        """Return (err, expected) if invalid, else None."""
-        full = f"{prefix}{key}"
+    def _validate_value(cls, key: str, val, typ: Any, prefix: str = ""):
+        """
+        Validate a single value against its declared type/rule.
 
-        # 1 scalar rules
+        Returns
+        -------
+        None                      – if the value is valid
+        (err, expected) : tuple   – if the value is invalid
+        """
+        full = f"{prefix}{key}"  # fully-qualified path at this level
+
+        # 1️⃣  scalar Rule --------------------------------------------------
         if cls._is_rule(typ):
             if not typ.validate(val):
-                return (
-                    f'"{full}" is invalid.',
-                    f'"{full}" {typ.describe()}',
-                )
+                return (f'"{full}" is invalid.',
+                        f'"{full}" {typ.describe()}')
             return None
 
-        # 2 lists
+        # 2️⃣  list ---------------------------------------------------------
         if cls._is_list(typ):
             if not isinstance(val, list):
-                return f'"{full}" must be a list, got {type(val).__name__}', f'"{full}" must be list'
+                return (f'"{full}" must be a list, got {type(val).__name__}',
+                        f'"{full}" must be list')
             elem_typ = get_args(typ)[0] if get_args(typ) else Any
             for i, v in enumerate(val):
                 err = cls._validate_value(f"{key}[{i}]", v, elem_typ, prefix)
@@ -769,59 +907,83 @@ class Schema:
                     return err
             return None
 
-        # 3 tuples
+        # 3️⃣  tuple --------------------------------------------------------
         if cls._is_tuple(typ):
             if not isinstance(val, (list, tuple)):
-                return f'"{full}" must be a tuple, got {type(val).__name__}', f'"{full}" must be tuple'
+                return (f'"{full}" must be a tuple, got {type(val).__name__}',
+                        f'"{full}" must be tuple')
             parts = get_args(typ)
             if len(val) != len(parts):
-                return (
-                    f'"{full}" must have length {len(parts)}, got {len(val)}',
-                    f'"{full}" must be length-{len(parts)} tuple',
-                )
+                return (f'"{full}" must have length {len(parts)}, got {len(val)}',
+                        f'"{full}" must be length-{len(parts)} tuple')
             for i, (v, sub_t) in enumerate(zip(val, parts)):
                 err = cls._validate_value(f"{key}[{i}]", v, sub_t, prefix)
                 if err:
                     return err
             return None
 
-        # 4 optional
+        # 4️⃣  Optional[T] --------------------------------------------------
         if cls._is_optional(typ):
-            non_none = next(t for t in get_args(typ) if t is not NoneType)
+            inner = next(t for t in get_args(typ) if t is not NoneType)
             if val is None:
                 return None
-            return cls._validate_value(key, val, non_none, prefix)
+            return cls._validate_value(key, val, inner, prefix)
 
-        # 5 union
+        # 5️⃣  Union[...] ---------------------------------------------------
         if cls._is_union(typ):
-            expected_msgs = []
+            expected_parts = []
             for alt in get_args(typ):
                 err = cls._validate_value(key, val, alt, prefix)
                 if err is None:
-                    return None
-                expected_msgs.append(err[1])
-            return (
-                f'"{full}" matches none of the allowed alternatives.',
-                " or ".join(expected_msgs),
-            )
+                    return None  # at least one branch OK
+                expected_parts.append(err[1])
+            return (f'"{full}" matches none of the allowed alternatives.',
+                    " or ".join(expected_parts))
 
-        # 6 nested Schemas
+        # 6️⃣  nested Schema -----------------------------------------------
         base = cls._origin(typ)
         if cls._is_schema(base):
             if not isinstance(val, dict):
-                return f'"{full}" must be an object', f'"{full}" must be an object'
+                return (f'"{full}" must be an object',
+                        f'"{full}" must be an object')
+
             ok, *reason = base.validate_with_error(val)
-            return None if ok else reason  # (err, expected)
+            if ok:
+                return None
 
-        # 7 primitives
+            # ── patch the inner error messages with outer path ────────────
+            if len(reason) == 2:
+                err_msg, exp_msg = reason
+
+                def _prepend_outer_path(msg: str) -> str:
+                    # only change messages that start with "quoted path"
+                    if msg.startswith('"'):
+                        end = msg.find('"', 1)
+                        if end != -1:
+                            inner_path = msg[1:end]
+                            if not inner_path.startswith(full + "."):
+                                return f'"{full}.{inner_path}"' + msg[end + 1:]
+                    return msg
+
+                return (f'"{full}.{err_msg[1:]}'
+                        if err_msg.startswith('"') else err_msg,
+                        _prepend_outer_path(exp_msg))
+
+            # fallback – propagate unchanged
+            return False, *reason
+
+        # 7️⃣  primitives ---------------------------------------------------
         if typ is str and not isinstance(val, str):
-            return f'"{full}" must be string', f'"{full}" must be string'
+            return (f'"{full}" must be string', f'"{full}" must be string')
         if typ is int and not isinstance(val, int):
-            return f'"{full}" must be integer', f'"{full}" must be integer'
+            return (f'"{full}" must be integer', f'"{full}" must be integer')
         if typ is float and not isinstance(val, (int, float)):
-            return f'"{full}" must be float', f'"{full}" must be float'
+            return (f'"{full}" must be float', f'"{full}" must be float')
+        if typ is bool and not isinstance(val, bool):
+            return (f'"{full}" must be boolean', f'"{full}" must be boolean')
 
-        return None
+        # ------------------------------------------------------------------
+        return None  # nothing complained ⇒ valid
 
     @classmethod
     def validate_with_error(cls, data: dict):
