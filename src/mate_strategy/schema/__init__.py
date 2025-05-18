@@ -848,8 +848,8 @@ class Schema:
                         and not cls._is_tuple(typ)
                         and not (cls._is_list(typ)
                                  and cls._is_schema(cls._origin(get_args(typ)[0])))):
-                    ex = json.dumps(cls._example_for_type(typ))[:10]
-                    lines.append(f"{IND3}(ex: {ex}{'…' if len(ex) == 10 else ''})")
+                    ex = json.dumps(cls._example_for_type(typ))[:20]
+                    lines.append(f"{IND3}(ex: {ex}{'…' if len(ex) == 20 else ''})")
 
                 # recurse into nested Schemas
                 if cls._is_schema(cls._origin(typ)):
