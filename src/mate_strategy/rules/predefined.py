@@ -4,8 +4,8 @@ from mate_strategy.rules import Rule
 
 class NaturalNumber(Rule):
     @classmethod
-    def description(cls):
-        return "must be a integer >= 1"
+    def describe(cls):
+        return "integer (>= 1)"
 
     @classmethod
     def example(cls):
@@ -21,7 +21,7 @@ class Interval(Rule):
     @classmethod
     def describe(cls):
         lo, hi = cls.__rule_params__
-        return f"must be a number between {lo} and {hi}"
+        return f"number between {lo} and {hi}"
 
     @classmethod
     def example(cls):
@@ -37,7 +37,7 @@ class Interval(Rule):
 class OneOf(Rule):
     @classmethod
     def describe(cls):
-        return "must be one of " + ", ".join(map(repr, cls.__rule_params__))
+        return "one of " + ", ".join(map(repr, cls.__rule_params__))
 
     @classmethod
     def example(cls):
