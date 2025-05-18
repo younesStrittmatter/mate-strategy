@@ -1075,27 +1075,75 @@ class Schema:
                 )
         return True,
 
+import re, inspect
+from typing import get_origin, get_args
+
+_BRACKETS_RE = re.compile(r"\[[^\]]*\]$")       # matches [], [0], [17] …
+
+def _base_name(part: str) -> str:
+    """'inner[]' -> 'inner',  'coords[0]' -> 'coords'."""
+    return _BRACKETS_RE.sub("", part)
+
+
+def _unwrap_container(typ):
+    """List[T] ➜ T   |   Tuple[A,B] ➜ (A or B, depending on index)."""
+    origin = get_origin(typ) or typ
+
+    # Optional[T]  →  T
+    if origin is Union and type(None) in get_args(typ) and len(get_args(typ)) == 2:
+        inner = next(t for t in get_args(typ) if t is not type(None))
+        return _unwrap_container(inner)
+
+    # List[T]  →  T
+    if origin is list:
+        return _unwrap_container(get_args(typ)[0])
+
+    # plain schema, rule, primitive …
+    return origin
+
 def _note_for_path(root_cls, parts):
     """
-    Follow `parts` (['inner', 'name', …]) down through nested
-    AnnotatedSchema classes and return the first matching note.
+    Follow a ‘inner[].name’-style path through nested AnnotatedSchema
+    definitions and return the first matching field-note.
     """
     if not parts or not (inspect.isclass(root_cls)
                          and issubclass(root_cls, AnnotatedSchema)):
         return None
 
-    field, *rest = parts
-    note = getattr(root_cls, "_field_notes", {}).get(field)
+    raw_head, *rest = parts
+    head = _base_name(raw_head)                        # <- strip “[]” / “[n]”
 
+    # note on the current class (if any)
+    note = getattr(root_cls, "_field_notes", {}).get(head)
+
+    # done?
     if not rest:
         return note
 
-    typ = root_cls.__annotations__.get(field)
+    # descend into the type of this field ────────────────────────────
+    typ = root_cls.__annotations__.get(head)
     if typ is None:
-        return note
+        return note                                      # nothing to follow
 
-    origin = get_origin(typ) or typ          # unwrap List[T] / Optional[T]
-    return _note_for_path(origin, rest) or note
+    target = _unwrap_container(typ)
+
+    # Tuple[...] is a special case – choose element by index if we have one
+    origin = get_origin(typ) or typ
+    if origin is tuple and "[" in raw_head:
+        idx = int(raw_head[raw_head.find('[')+1:raw_head.find(']')] or 0)
+        tup_args = get_args(typ)
+        if idx < len(tup_args):
+            target = _unwrap_container(tup_args[idx])
+
+    # Union[..., …] – pick the first schema alternative
+    if get_origin(target) is Union:
+        for alt in get_args(target):
+            cand = _unwrap_container(alt)  # <── unwrap first
+            if inspect.isclass(cand) and issubclass(cand, AnnotatedSchema):
+                target = cand  # descend into this one
+                break
+
+    return _note_for_path(target, rest) or note
 
 # ---------------------------------------------------------------------
 #  AnnotatedSchema  –  opt-in “Schema with doc-string annotations”
@@ -1193,6 +1241,101 @@ class AnnotatedSchema(Schema):
     }
     <BLANKLINE>
     Return **only** the JSON object — no code-fences, no comments.
+
+    >>> from typing import List
+    >>> @dataclass
+    ... class OuterSchema(AnnotatedSchema):
+    ...     '''
+    ...     Outer level in a factorial design
+    ...
+    ...     inner: List of single level in a factorial design
+    ...     weight: Optional repetition weight
+    ...     '''
+    ...     inner: List[LevelSchema]
+    ...     weight: Optional[int]
+    ...
+    >>> print(OuterSchema.prompt())
+    Fill in **valid JSON** for the fields below. – **Outer level in a factorial design**
+    <BLANKLINE>
+    Rules
+    - inner  – List of single level in a factorial design
+      • list of LevelSchema – Single level in a factorial design
+      - inner[].name  – The concrete value (e.g. "red")
+        • string
+          (ex: "example")
+      - inner[].weight  – Optional repetition weight
+        • (Optional) Key can be *missing* or:
+          - integer
+          - None
+    - weight  – Optional repetition weight
+      • (Optional) Key can be *missing* or:
+        - integer
+        - None
+    <BLANKLINE>
+    Example:
+    {
+      "inner": [
+        {
+          "name": "example",
+          "weight": 42
+        }
+      ],
+      "weight": 42
+    }
+    <BLANKLINE>
+    Return **only** the JSON object — no code-fences, no comments.
+
+
+    >>> @dataclass
+    ... class Deep(AnnotatedSchema):
+    ...     '''
+    ...     Deep schema
+    ...     id: deepest
+    ...     '''
+    ...     id: int
+
+    >>> @dataclass
+    ... class Outer(AnnotatedSchema):
+    ...     '''
+    ...     Outer schema
+    ...     nest : crazy types
+    ...     '''
+    ...     nest: Union[
+    ...         List[Deep],
+    ...         Optional[Tuple[Deep, int]],
+    ...         Union[Tuple[Deep, List[Deep]], List[Deep]]
+    ...     ]
+
+    >>> print(Outer.prompt()) # doctest: +NORMALIZE_WHITESPACE
+    Fill in **valid JSON** for the fields below. – **Outer schema**
+    <BLANKLINE>
+    Rules
+    - nest  – crazy types
+      • choose **one** of:
+        1. list of Deep – Deep schema
+          - nest[].id  – deepest
+            • integer
+              (ex: 42)
+        2. tuple ⟨el[0] Deep – Deep schema, el[1] integer⟩
+          - nest[0].id  – deepest
+            • integer
+              (ex: 42)
+        3. <class 'NoneType'>
+        4. tuple ⟨el[0] Deep – Deep schema, el[1] list of Deep – Deep schema⟩
+          - nest[0].id  – deepest
+            • integer
+              (ex: 42)
+    <BLANKLINE>
+    Example:
+    {
+      "nest": [
+        {
+          "id": 42
+        }
+      ]
+    }
+    <BLANKLINE>
+    Return **only** the JSON object — no code-fences, no comments.
     """
 
     # parsed once per subclass -----------------------------------------
@@ -1258,16 +1401,24 @@ class AnnotatedSchema(Schema):
     # ------------------------------------------------------------------
     @classmethod
     def rules(cls, prefix: str = "", _lvl: int = 0) -> list[str]:
-        lines = super().rules(prefix, _lvl)
+        parent_lines = super().rules(prefix, _lvl)
 
-        patched = []
-        for ln in lines:
-            stripped = ln.lstrip()  # works even when indented
+        patched: list[str] = []
+        for ln in parent_lines:
+            stripped = ln.lstrip()
             if stripped.startswith("- "):
-                full_field = stripped[2:].split()[0]  # inner.name …
-                note = _note_for_path(cls, full_field.split("."))
-                if note and " – " not in ln:  # no double-patch
+
+                full_path = stripped[2:].split()[0]  # e.g.  'nest[].id'
+                parts = full_path.split(".")
+
+                # ── NEW ── drop leading components that belong to outer schemas
+                while parts and parts[0].split("[", 1)[0] not in cls.__annotations__:
+                    parts = parts[1:]  # discard 'nest[]'
+
+                note = _note_for_path(cls, parts)
+                if note and " – " not in ln:  # no double patch
                     ln = f"{ln}  – {note}"
+
             patched.append(ln)
         return patched
 
