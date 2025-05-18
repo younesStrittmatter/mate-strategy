@@ -1190,6 +1190,7 @@ class AnnotatedSchema(Schema):
     ... class LevelSchema(AnnotatedSchema):
     ...     '''
     ...     Single level in a factorial design
+    ...     blabla
     ...
     ...     name  : The concrete value (e.g. "red")
     ...     weight: Optional repetition weight
@@ -1368,9 +1369,16 @@ class AnnotatedSchema(Schema):
         lines = [l.rstrip() for l in doc.splitlines()]
 
         # header  = first non-blank line
+        started = False
+
         for ln in lines:
             if ln.strip():
-                cls._doc_header = ln.strip()
+                if not cls._doc_header:
+                    cls._doc_header = ln.strip()
+                else:
+                    cls._doc_header += "\n " + ln.strip()
+                started = True
+            elif started:
                 break
 
         # “field: note”  or  “field – note”
