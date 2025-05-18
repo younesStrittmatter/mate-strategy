@@ -1450,10 +1450,16 @@ class AnnotatedSchema(Schema):
         if cls._doc_header:
             lead += f" – **{cls._doc_header}**"
 
+        rule_block = "\n".join(cls.rules())
+
+        # NEW – render every example (base + extras)
+        ex_blocks = "\n\n".join(
+            f"Example {i + 1}:\n```json\n{json.dumps(ex, indent=2)}\n```"
+            for i, ex in enumerate(cls._all_examples())
+        )
+
         return (
-            f"{lead}\n\nRules\n"
-            + "\n".join(cls.rules())
-            + "\n\nExample:\n"
-            + json.dumps(cls.example(), indent=2)
-            + "\n\nReturn **only** the JSON object — no code-fences, no comments."
+            f"{lead}\n\nRules\n{rule_block}"
+            f"\n\n{ex_blocks}"
+            "\n\nReturn **only** the JSON object — no code-fences, no comments."
         )
