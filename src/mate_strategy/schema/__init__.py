@@ -602,6 +602,7 @@ class Schema:
 
     """
     _declared_constraints: list[tuple[str, str, staticmethod]] = []
+    __additional_examples__: list[dict] = []
 
     def __init_subclass__(cls):
         super().__init_subclass__()
@@ -900,13 +901,33 @@ class Schema:
         return ex
 
     @classmethod
+    def _all_examples(cls) -> list[dict]:
+        """Base example + any hard-coded extras."""
+        base = cls.example()  # current single example
+        extras = getattr(cls, "__additional_examples__", [])
+        # normalise: allow user to supply one dict or a list
+        if extras and isinstance(extras, dict):
+            extras = [extras]
+        return [base, *extras]
+
+    @classmethod
     def prompt(cls) -> str:
+        lead = "Fill in **valid JSON** for the fields below."
+        if getattr(cls, "_doc_header", ""):
+            lead += f" – **{cls._doc_header}**"
+
+        rule_block = "\n".join(cls.rules())
+
+        # render every example in a fenced block for readability
+        ex_blocks = "\n\n".join(
+            "Example {}:\n```json\n{}\n```".format(i + 1,
+                                                   json.dumps(ex, indent=2))
+            for i, ex in enumerate(cls._all_examples())
+        )
+
         return (
-                "Fill in **valid JSON** for the fields below.\n\nRules\n"
-                + "\n".join(cls.rules())
-                + "\n\nExample:\n"
-                + json.dumps(cls.example(), indent=2)
-                + "\n\nReturn **only** the JSON object — no code-fences, no comments."
+            f"{lead}\n\nRules\n{rule_block}\n\n{ex_blocks}"
+            "\n\nReturn **only** the JSON object — no code-fences, no comments."
         )
 
     # ────────────────────────── validation ─────────────────────────
