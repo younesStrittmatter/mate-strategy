@@ -89,12 +89,10 @@ class Schema:
             • string      (ex: "example")
         <BLANKLINE>
         Current value (invalid):
-        ```json
         {
           "x": 42,
           "y": 42
         }
-        ```
         <BLANKLINE>
         Reply with **only** the corrected JSON object.
 
@@ -152,12 +150,10 @@ class Schema:
             • must be one of 'green', 'red', 'blue'      (ex: "green")
         <BLANKLINE>
         Current value (invalid):
-        ```json
         {
           "x": 42,
           "y": "yellow"
         }
-        ```
         <BLANKLINE>
         Reply with **only** the corrected JSON object.
 
@@ -442,7 +438,6 @@ class Schema:
               (ex: "example")
         <BLANKLINE>
         Current value (invalid):
-        ```json
         {
           "a": {
             "z": [
@@ -455,7 +450,6 @@ class Schema:
           },
           "b": "example"
         }
-        ```
         <BLANKLINE>
         Reply with **only** the corrected JSON object.
 
@@ -920,7 +914,7 @@ class Schema:
 
         # render every example in a fenced block for readability
         ex_blocks = "\n\n".join(
-            "Example {}:\n```json\n{}\n```".format(i + 1,
+            "Example {}:\n{}\n".format(i + 1,
                                                    json.dumps(ex, indent=2))
             for i, ex in enumerate(cls._all_examples())
         )
@@ -1081,7 +1075,7 @@ class Schema:
                 f"{reason_msg}"
                 "Rules:\n" + "\n".join(cls.rules()) + "\n\n"
                                                       "Current value (invalid):\n"
-                                                      f"```json\n{json.dumps(bad_data, indent=2)}\n```\n\n"
+                                                      f"{json.dumps(bad_data, indent=2)}\n\n"
                                                       "Reply with **only** the corrected JSON object."
         )
 
@@ -1454,7 +1448,7 @@ class AnnotatedSchema(Schema):
 
         # NEW – render every example (base + extras)
         ex_blocks = "\n\n".join(
-            f"Example {i + 1}:\n```json\n{json.dumps(ex, indent=2)}\n```"
+            f"Example {i + 1}:\n{json.dumps(ex, indent=2)}"
             for i, ex in enumerate(cls._all_examples())
         )
 
