@@ -2,6 +2,20 @@ import re, random
 
 from mate_strategy.rules import Rule
 
+class NaturalNumber(Rule):
+    @classmethod
+    def description(cls):
+        return "must be a integer >= 1"
+
+    @classmethod
+    def example(cls):
+        return 3
+
+    @classmethod
+    def validate(cls, v):
+        return isinstance(v, int) and v >= 1
+
+
 
 class Interval(Rule):
     @classmethod
