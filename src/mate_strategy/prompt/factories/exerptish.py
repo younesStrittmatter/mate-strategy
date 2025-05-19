@@ -11,18 +11,10 @@ def excerptish_prompt(
         similarity: float = 0.75,
 ) -> Prompt:
     """
-    Generic helper → Prompt(schema).
+    Builds a prompt to extract text from a larger body of text.
 
-    Parameters
-    ----------
-    raw_text        Article OCR dump
-    labels          Full list of canonical labels
-    target_label    The label to extract
-    similarity      Fuzzy-matching threshold (0–1)
-    template        Optional custom prompt string
-                    (must include `{raw_text}` at minimum)
-    fmt             Extra replacement dict for `template.format(**fmt)`
-                    – lets callers inject task-specific instructions.
+    Examples:
+
     """
 
     schema = excerptish_schema(

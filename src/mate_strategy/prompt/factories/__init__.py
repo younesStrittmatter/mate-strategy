@@ -1,0 +1,1 @@
+from mate_strategy.prompt.factories.exerptish import excerptish_prompt
