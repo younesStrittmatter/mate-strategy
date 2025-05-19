@@ -1,0 +1,1 @@
+from mate_strategy.rules.factories.excerptish import excerptish_rule

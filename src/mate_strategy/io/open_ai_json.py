@@ -3,6 +3,8 @@ import json
 
 from mate_strategy.io.open_ai_io import ask_ai
 
+SYSTEM_JSON = "You are a JSON-only extraction assistant. Reply ONLY with valid JSON."
+
 
 def ask_ai_json(prompt: str,
                 model: str = None,
@@ -39,4 +41,4 @@ def process_to_json(resp: str) -> dict:
         return {}
 
 
-SYSTEM_JSON = "You are a JSON-only extraction assistant. Reply ONLY with valid JSON."
+
