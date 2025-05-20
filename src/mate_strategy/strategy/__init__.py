@@ -14,12 +14,13 @@ Public objects
 
 from __future__ import annotations
 
-import time, inspect, copy, contextlib, json
+import time, inspect, copy, contextlib, json, textwrap, types
 
-from dataclasses import dataclass, field
-from typing import Dict, Any, Callable, Protocol
+from dataclasses import dataclass, field, make_dataclass
+from typing import Dict, Any, Callable, Protocol, Tuple
 from contextlib import contextmanager
 from functools import wraps
+
 
 from mate_strategy.io.open_ai_json import ask_ai_json
 from mate_strategy.prompt import Prompt
@@ -479,9 +480,6 @@ class Fallback(Strategy):
           ✖ err: "c" is missing.
           ✖ exp: "c" must be present.
 
-
-
-
     """
     inner: Strategy
     fallback: Strategy
@@ -698,3 +696,165 @@ class AutoRepair(Strategy):
             cur[int(last)] = value
         else:
             cur[last] = value
+
+
+# confidence_strategy.py  ─────────────────────────────────────────────
+
+
+_conf_cache = {}
+
+
+# ---------------------------------------------------------------------
+# 1.  build an ad-hoc Schema subclass that adds ‘confidence’
+# ---------------------------------------------------------------------
+def _with_confidence(schema_cls):
+    if schema_cls in _conf_cache:  # already augmented → reuse
+        return _conf_cache[schema_cls]
+
+    # make_dataclass takes:  name, fields, bases …
+    ext_cls = make_dataclass(
+        cls_name=f"{schema_cls.__name__}WithConf",
+        fields=[("confidence", Interval[0, 100])],
+        bases=(schema_cls,),
+        namespace={"_CONF_AUGMENTED": True},  # sentinel
+    )
+    _conf_cache[schema_cls] = ext_cls
+    return ext_cls
+
+
+# ---------------------------------------------------------------------
+# 2.  the wrapper strategy
+# ---------------------------------------------------------------------
+@dataclass
+class Confidence(Strategy):
+    """
+    Wrap *any* Strategy so that the final JSON must contain an
+    extra `"confidence": <0-100>` field rated by the model itself.
+
+    Examples:
+        >>> from dataclasses import dataclass
+        >>> from mate_strategy.rules.predefined import Interval
+        >>> from mate_strategy.schema import Schema
+        >>> @dataclass
+        ... class LuckyNumbers(Schema):
+        ...     a: Interval[0, 10]
+        ...     b: Interval[0, 10]
+
+        Then we create a prompt with a template and the schema:
+        >>> from mate_strategy.prompt import Prompt
+        >>> prompt = Prompt('Give me two {attribute} numbers', LuckyNumbers)
+
+        In this example we create a fake LLM call that returns random numbers
+        (typically you can skip this step and use the default `ask_ai_json` function)
+        >>> import random
+        >>> def fake_ask_ai(prompt): return {'a': random.randint(0, 20), 'b': random.randint(0, 20)}
+
+        We can now create the strategy:
+        >>> base = BaseStrategy(prompt, ask_ai=fake_ask_ai)
+
+        and then execute it ...
+        >>> random.seed(42)
+        >>> base(attribute='lucky', retries=8)
+        ({'a': 0, 'b': 8}, True, None, None)
+
+        ... we can wrap the strategy with the Confidence strategy:
+        >>> confidence = Confidence(base)
+        >>> print(confidence.prompt.render(attribute='green')) # doctest: +NORMALIZE_WHITESPACE
+
+    """
+    inner: Strategy
+    prompt: Prompt = None  # will be constructed automatically
+
+    def __post_init__(self):
+        # ----- 2a.  clone & extend the prompt / schema ----------------
+        base_prompt: Prompt = self.inner.prompt
+        base_schema = base_prompt.schema
+        ext_schema = _with_confidence(base_schema)
+
+        addendum = textwrap.dedent("""
+            ---
+            **Extra instruction**  
+            Besides the normal answer, also output a key `"confidence"`
+            with an integer 0-100 indicating *how confident you are that
+            the JSON you return is completely correct.*""")
+
+        new_tmpl = base_prompt.template + addendum
+        self.prompt = Prompt(new_tmpl, ext_schema)
+
+    # ----- 2b. execute: just delegate to the (patched) inner strategy --
+    @kwroute
+    @override_self
+    def __call__(self, prompt: Prompt | None = None, **kw):
+        # allow on-the-fly prompt override
+        if prompt is not None:
+            self.prompt = prompt
+
+        # build a *temporary* inner strategy that uses the extended prompt
+        tmp_inner = copy.copy(self.inner)
+        tmp_inner.prompt = self.prompt
+
+        return tmp_inner(**kw)
+
+
+# confidence_fallback_strategy.py  ────────────────────────────────────
+
+@dataclass
+class ConfidenceFallback(Strategy):
+    """
+    1️⃣  Ask *inner* **with confidence**
+    2️⃣  If JSON is valid **and** confidence ≥ *threshold*  → return it
+    3️⃣  else                                             → call *fallback*
+
+    Example
+    -------
+        >>> from dataclasses import dataclass
+        >>> from mate_strategy.rules.predefined import Interval
+        >>> from mate_strategy.schema import Schema
+        >>> @dataclass
+        ... class Lucky(Schema):
+        ...     x: Interval[0, 10]
+        ...     y: Interval[0, 10]
+        ...
+        >>> prompt  = Prompt("Give me two numbers", Lucky)
+        >>> confident_ai = lambda *_: {"x": 3, "y": 7, "confidence": 90}
+        >>> unconfident_ai  = lambda *_: {"x": 3, "y": 7, "confidence": 20}
+        >>> fallback_ai = lambda *_: {"x": 5, "y": 5}
+        >>> inner_cf   = BaseStrategy(prompt, ask_ai=confident_ai)
+        >>> inner_ucf = BaseStrategy(prompt, ask_ai=unconfident_ai)
+        >>> fallback   = BaseStrategy(prompt, ask_ai=fallback_ai)
+        >>> strat_in   = ConfidenceFallback(inner_cf, fallback, threshold=80)
+        >>> strat_in()
+        ({'x': 3, 'y': 7, 'confidence': 90}, True, None, None)
+
+        >>> strat_out = ConfidenceFallback(inner_ucf, fallback, threshold=80)
+        >>> strat_out()
+        ({'x': 5, 'y': 5}, True, None, None)
+    """
+    inner: Strategy
+    fallback: Strategy
+    threshold: int = 80          # minimum accepted confidence
+
+    _conf_inner: Confidence = field(init=False, repr=False)
+    prompt: Prompt = field(init=False)
+
+    # ───────────────────────────────────────────────────────────
+    def __post_init__(self):
+        # wrap *inner* once with Confidence
+        self._conf_inner = Confidence(self.inner)
+        self.prompt = self._conf_inner.prompt      # expose extended prompt
+
+    # ───────────────────────────────────────────────────────────
+    @kwroute
+    @override_self
+    def __call__(self, **tmpl) -> Tuple[Dict[str, Any], bool, str | None, str | None]:
+        # ① run the confidence-augmented inner strategy
+        reply, ok, err, exp = self._conf_inner(**tmpl)
+
+        # ② accept if JSON is valid and confidence high enough
+        if ok:
+            conf = reply.get("confidence", -1)
+            if isinstance(conf, (int, float)) and conf >= self.threshold:
+                return reply, True, None, None
+
+        # ③ otherwise fall back
+        return self.fallback(**tmpl)
