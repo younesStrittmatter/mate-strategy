@@ -1,4 +1,4 @@
-import time, json, re
+import time
 
 from openai import OpenAI
 
@@ -16,6 +16,7 @@ def ask_ai(prompt: str,
     """
     if model is None:
         model = config["assist-model"]
+
 
     client = OpenAI(api_key=config["openai-key"])
     messages = []
